@@ -5,11 +5,13 @@
 (function () {
   const DEBUG = true;
   const LOG_PREFIX = "[SPenNotes]";
-  const STORAGE_POS_KEY = "spenNotes.toolbarPos.v1";
+  const STORAGE_POS_KEY = "spenNotes.toolbarPos.v2";
   const STORAGE_COLLAPSED_KEY = "spenNotes.toolbarCollapsed.v1";
   const PEN_CONTEXT_WINDOW_MS = 600;
   const MOVE_THROTTLE_MS = 140;
   const MAX_OVERLAY_LOGS = 60;
+  const SNAP_THRESHOLD_PX = 36;
+  const EDGE_MARGIN_PX = 10;
 
   if (typeof window.__spenNotesCleanup === "function") {
     try {
@@ -296,7 +298,6 @@
 
   function toggleEraseFromPenButton(reason) {
     const now = performance.now();
-    // Zabezpieczenie przed podwójnym wyzwoleniem z tego samego kliknięcia (np. pointerdown + contextmenu)
     if (now - penEraseState.lastToggleTime < 150) return;
     penEraseState.lastToggleTime = now;
 
@@ -305,13 +306,11 @@
 
     const currentTool = getCurrentToolType(api);
 
-    // Jeśli użytkownik w międzyczasie ręcznie zmienił gumkę na inne narzędzie na pasku, synchronizujemy stan
     if (penEraseState.isAutoErasing && currentTool !== "eraser" && uiState.tool !== "eraser") {
       penEraseState.isAutoErasing = false;
     }
 
     if (!penEraseState.isAutoErasing) {
-      // 1. Kliknięcie: Włącz gumkę i zapamiętaj poprzednie narzędzie (wraz ze stanem zakreślacza)
       const toolToSave = (currentTool && currentTool !== "eraser")
         ? currentTool
         : (uiState.tool && uiState.tool !== "eraser" ? uiState.tool : "freedraw");
@@ -330,9 +329,24 @@
         toolbarSyncFn(false);
       }
     } else {
-      // 2. Kliknięcie: Wyłącz gumkę i wróć do poprzedniego narzędzia
       restorePreviousToolAfterErase(reason);
     }
+  }
+
+  function ensureToolbarStyles() {
+    if (document.getElementById("spen-notes-toolbar-css")) return;
+    const styleEl = document.createElement("style");
+    styleEl.id = "spen-notes-toolbar-css";
+    styleEl.textContent = `
+      #spen-notes-floating-toolbar .spen-toolbar-scroll {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      #spen-notes-floating-toolbar .spen-toolbar-scroll::-webkit-scrollbar {
+        display: none;
+      }
+    `;
+    trackDomElement(styleEl, document.head, "global");
   }
 
   function createDiagnosticOverlay() {
@@ -468,54 +482,182 @@
     overlayLogEl = logBox;
   }
 
-  function createFloatingToolbar(parentContainer) {
+  function createFloatingToolbar(excalidrawContainer) {
+    ensureToolbarStyles();
+
     const bar = document.createElement("div");
     bar.id = "spen-notes-floating-toolbar";
     Object.assign(bar.style, {
       position: "fixed",
       top: "56px",
-      left: "50%",
-      transform: "translateX(-50%)",
+      left: "56px",
       zIndex: "9990",
       display: "flex",
       alignItems: "center",
       flexWrap: "nowrap",
       gap: "4px",
       padding: "5px 6px",
-      maxWidth: "96vw",
       backgroundColor: "var(--background-primary, #1e1e1e)",
       color: "var(--text-normal, #e0e0e0)",
       border: "1px solid var(--background-modifier-border, #444)",
       borderRadius: "10px",
       boxShadow: "0 6px 20px rgba(0,0,0,0.28)",
-      touchAction: "none",
       userSelect: "none",
       fontFamily: "var(--font-interface, sans-serif)",
-      fontSize: "11px"
+      fontSize: "11px",
+      boxSizing: "border-box"
     });
 
     ["pointerdown", "pointermove", "pointerup", "touchstart", "contextmenu"].forEach((evtName) => {
       trackListener(bar, evtName, (e) => e.stopPropagation(), false, "view");
     });
 
+    // Stan dokowania i pozycji względem widoku Excalidraw
+    let layoutState = {
+      dock: "top", // "top" | "bottom" | "left" | "right" | "none"
+      relX: 0.5,
+      relY: 0.0
+    };
     let isCollapsed = false;
+
     try {
       const savedPos = JSON.parse(localStorage.getItem(STORAGE_POS_KEY) || "null");
-      if (savedPos && typeof savedPos.left === "number" && typeof savedPos.top === "number") {
-        bar.style.transform = "none";
-        bar.style.left = `${Math.max(8, Math.min(window.innerWidth - 80, savedPos.left))}px`;
-        bar.style.top = `${Math.max(8, Math.min(window.innerHeight - 60, savedPos.top))}px`;
+      if (savedPos && typeof savedPos === "object") {
+        if (["top", "bottom", "left", "right", "none"].includes(savedPos.dock)) {
+          layoutState.dock = savedPos.dock;
+        }
+        if (typeof savedPos.relX === "number") layoutState.relX = savedPos.relX;
+        if (typeof savedPos.relY === "number") layoutState.relY = savedPos.relY;
       }
       isCollapsed = localStorage.getItem(STORAGE_COLLAPSED_KEY) === "1";
     } catch (err) {
       // Ignoruj
     }
 
+    function getViewportBounds() {
+      const target = excalidrawContainer && excalidrawContainer.isConnected ? excalidrawContainer : document.body;
+      const r = target.getBoundingClientRect();
+      if (r.width > 40 && r.height > 40) {
+        return {
+          left: r.left,
+          top: r.top,
+          right: r.right,
+          bottom: r.bottom,
+          width: r.width,
+          height: r.height
+        };
+      }
+      return {
+        left: 0,
+        top: 0,
+        right: window.innerWidth,
+        bottom: window.innerHeight,
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+    }
+
+    const dividers = [];
+    function applyOrientation(vertical) {
+      bar.style.flexDirection = vertical ? "column" : "row";
+      contentWrap.style.flexDirection = vertical ? "column" : "row";
+
+      if (vertical) {
+        contentWrap.style.overflowX = "hidden";
+        contentWrap.style.overflowY = "auto";
+        contentWrap.style.touchAction = "pan-y";
+        dragHandle.style.width = "30px";
+        dragHandle.style.height = "24px";
+        collapseBtn.style.width = "30px";
+        collapseBtn.style.height = "24px";
+      } else {
+        contentWrap.style.overflowX = "auto";
+        contentWrap.style.overflowY = "hidden";
+        contentWrap.style.touchAction = "pan-x";
+        dragHandle.style.width = "24px";
+        dragHandle.style.height = "30px";
+        collapseBtn.style.width = "24px";
+        collapseBtn.style.height = "30px";
+      }
+
+      dividers.forEach((div) => {
+        if (vertical) {
+          div.style.width = "20px";
+          div.style.height = "1px";
+          div.style.margin = "1px 0";
+        } else {
+          div.style.width = "1px";
+          div.style.height = "20px";
+          div.style.margin = "0 1px";
+        }
+      });
+    }
+
+    function syncPositionToBounds() {
+      const bounds = getViewportBounds();
+      const isVertical = layoutState.dock === "left" || layoutState.dock === "right";
+      applyOrientation(isVertical);
+
+      const maxAvailW = Math.max(80, bounds.width - EDGE_MARGIN_PX * 2);
+      const maxAvailH = Math.max(80, bounds.height - EDGE_MARGIN_PX * 2);
+
+      if (isVertical) {
+        bar.style.maxWidth = "none";
+        bar.style.maxHeight = `${maxAvailH}px`;
+      } else {
+        bar.style.maxWidth = `${maxAvailW}px`;
+        bar.style.maxHeight = "none";
+      }
+
+      const barRect = bar.getBoundingClientRect();
+      const w = barRect.width || 40;
+      const h = barRect.height || 40;
+
+      const minLeft = bounds.left + EDGE_MARGIN_PX;
+      const maxLeft = Math.max(minLeft, bounds.right - w - EDGE_MARGIN_PX);
+      const minTop = bounds.top + EDGE_MARGIN_PX;
+      const maxTop = Math.max(minTop, bounds.bottom - h - EDGE_MARGIN_PX);
+
+      let nextLeft = minLeft;
+      let nextTop = minTop;
+
+      if (layoutState.dock === "top") {
+        nextTop = minTop;
+        nextLeft = bounds.left + (bounds.width - w) * layoutState.relX;
+      } else if (layoutState.dock === "bottom") {
+        nextTop = maxTop;
+        nextLeft = bounds.left + (bounds.width - w) * layoutState.relX;
+      } else if (layoutState.dock === "left") {
+        nextLeft = minLeft;
+        nextTop = bounds.top + (bounds.height - h) * layoutState.relY;
+      } else if (layoutState.dock === "right") {
+        nextLeft = maxLeft;
+        nextTop = bounds.top + (bounds.height - h) * layoutState.relY;
+      } else {
+        nextLeft = bounds.left + (bounds.width - w) * layoutState.relX;
+        nextTop = bounds.top + (bounds.height - h) * layoutState.relY;
+      }
+
+      nextLeft = Math.max(minLeft, Math.min(maxLeft, nextLeft));
+      nextTop = Math.max(minTop, Math.min(maxTop, nextTop));
+
+      bar.style.left = `${Math.round(nextLeft)}px`;
+      bar.style.top = `${Math.round(nextTop)}px`;
+    }
+
+    function saveLayoutState() {
+      try {
+        localStorage.setItem(STORAGE_POS_KEY, JSON.stringify(layoutState));
+      } catch (err) {
+        // Ignoruj
+      }
+    }
+
     const dragHandle = document.createElement("div");
     dragHandle.innerHTML = ICONS.grip;
-    dragHandle.title = "Przeciągnij pasek";
+    dragHandle.title = "Przeciągnij pasek (przyciąga do góry, dołu lub boków)";
     Object.assign(dragHandle.style, {
-      width: "26px",
+      width: "24px",
       height: "30px",
       flexShrink: "0",
       display: "flex",
@@ -538,14 +680,12 @@
       (e) => {
         if (e.button !== undefined && e.button !== 0 && e.pointerType === "mouse") return;
         const rect = bar.getBoundingClientRect();
-        bar.style.transform = "none";
-        bar.style.left = `${rect.left}px`;
-        bar.style.top = `${rect.top}px`;
         dragState = {
           pointerId: e.pointerId,
           offsetX: e.clientX - rect.left,
           offsetY: e.clientY - rect.top
         };
+        dragHandle.style.cursor = "grabbing";
         if (typeof dragHandle.setPointerCapture === "function") {
           try {
             dragHandle.setPointerCapture(e.pointerId);
@@ -564,12 +704,31 @@
       "pointermove",
       (e) => {
         if (!dragState || e.pointerId !== dragState.pointerId) return;
-        const maxX = Math.max(8, window.innerWidth - bar.offsetWidth - 8);
-        const maxY = Math.max(8, window.innerHeight - bar.offsetHeight - 8);
-        const nextLeft = Math.max(8, Math.min(maxX, e.clientX - dragState.offsetX));
-        const nextTop = Math.max(8, Math.min(maxY, e.clientY - dragState.offsetY));
-        bar.style.left = `${nextLeft}px`;
-        bar.style.top = `${nextTop}px`;
+        const bounds = getViewportBounds();
+        const rawLeft = e.clientX - dragState.offsetX;
+        const rawTop = e.clientY - dragState.offsetY;
+
+        // Podgląd orientacji podczas zbliżania do lewej lub prawej krawędzi
+        const distLeft = Math.abs(rawLeft - (bounds.left + EDGE_MARGIN_PX));
+        const distRight = Math.abs(bounds.right - EDGE_MARGIN_PX - (rawLeft + bar.offsetWidth));
+        const nearSide = distLeft < SNAP_THRESHOLD_PX || distRight < SNAP_THRESHOLD_PX;
+        applyOrientation(nearSide);
+
+        const maxAvailW = Math.max(80, bounds.width - EDGE_MARGIN_PX * 2);
+        const maxAvailH = Math.max(80, bounds.height - EDGE_MARGIN_PX * 2);
+        bar.style.maxWidth = nearSide ? "none" : `${maxAvailW}px`;
+        bar.style.maxHeight = nearSide ? `${maxAvailH}px` : "none";
+
+        const minLeft = bounds.left + EDGE_MARGIN_PX;
+        const maxLeft = Math.max(minLeft, bounds.right - bar.offsetWidth - EDGE_MARGIN_PX);
+        const minTop = bounds.top + EDGE_MARGIN_PX;
+        const maxTop = Math.max(minTop, bounds.bottom - bar.offsetHeight - EDGE_MARGIN_PX);
+
+        const clampedLeft = Math.max(minLeft, Math.min(maxLeft, rawLeft));
+        const clampedTop = Math.max(minTop, Math.min(maxTop, rawTop));
+
+        bar.style.left = `${Math.round(clampedLeft)}px`;
+        bar.style.top = `${Math.round(clampedTop)}px`;
       },
       false,
       "view"
@@ -578,31 +737,78 @@
     const finishDrag = (e) => {
       if (!dragState || (e && e.pointerId !== undefined && e.pointerId !== dragState.pointerId)) return;
       dragState = null;
+      dragHandle.style.cursor = "grab";
+
+      const bounds = getViewportBounds();
       const rect = bar.getBoundingClientRect();
-      try {
-        localStorage.setItem(
-          STORAGE_POS_KEY,
-          JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) })
-        );
-      } catch (err) {
-        // Ignoruj
+
+      const distTop = Math.abs(rect.top - (bounds.top + EDGE_MARGIN_PX));
+      const distBottom = Math.abs(bounds.bottom - EDGE_MARGIN_PX - rect.bottom);
+      const distLeft = Math.abs(rect.left - (bounds.left + EDGE_MARGIN_PX));
+      const distRight = Math.abs(bounds.right - EDGE_MARGIN_PX - rect.right);
+
+      const candidates = [
+        { side: "top", dist: distTop },
+        { side: "bottom", dist: distBottom },
+        { side: "left", dist: distLeft },
+        { side: "right", dist: distRight }
+      ].sort((a, b) => a.dist - b.dist);
+
+      if (candidates[0].dist <= SNAP_THRESHOLD_PX) {
+        layoutState.dock = candidates[0].side;
+      } else {
+        layoutState.dock = "none";
       }
+
+      // Przelicz orientację po zatwierdzeniu dokowania, aby dokładnie policzyć relatywną pozycję
+      const isVertical = layoutState.dock === "left" || layoutState.dock === "right";
+      applyOrientation(isVertical);
+      const updatedRect = bar.getBoundingClientRect();
+
+      const freeW = Math.max(1, bounds.width - updatedRect.width - EDGE_MARGIN_PX * 2);
+      const freeH = Math.max(1, bounds.height - updatedRect.height - EDGE_MARGIN_PX * 2);
+
+      layoutState.relX = Math.max(0, Math.min(1, (updatedRect.left - (bounds.left + EDGE_MARGIN_PX)) / freeW));
+      layoutState.relY = Math.max(0, Math.min(1, (updatedRect.top - (bounds.top + EDGE_MARGIN_PX)) / freeH));
+
+      syncPositionToBounds();
+      saveLayoutState();
     };
 
     trackListener(dragHandle, "pointerup", finishDrag, false, "view");
     trackListener(dragHandle, "pointercancel", finishDrag, false, "view");
 
     const contentWrap = document.createElement("div");
+    contentWrap.className = "spen-toolbar-scroll";
     Object.assign(contentWrap.style, {
       display: isCollapsed ? "none" : "flex",
       alignItems: "center",
-      justifyContent: "center",
       gap: "4px",
-      flexWrap: "wrap",
+      flexWrap: "nowrap",
       flex: "1 1 auto",
-      minWidth: "0"
+      minWidth: "0",
+      minHeight: "0",
+      overflowX: "auto",
+      overflowY: "hidden",
+      touchAction: "pan-x",
+      overscrollBehavior: "contain"
     });
     bar.appendChild(contentWrap);
+
+    // Umożliwia przewijanie poziome kółkiem myszy na desktopie
+    trackListener(
+      contentWrap,
+      "wheel",
+      (e) => {
+        const isVertical = layoutState.dock === "left" || layoutState.dock === "right";
+        if (!isVertical && e.deltaY !== 0 && contentWrap.scrollWidth > contentWrap.clientWidth) {
+          contentWrap.scrollLeft += e.deltaY;
+          e.preventDefault();
+        }
+      },
+      { passive: false },
+      "view"
+    );
 
     function makeDivider() {
       const div = document.createElement("span");
@@ -613,6 +819,7 @@
         margin: "0 1px",
         flexShrink: "0"
       });
+      dividers.push(div);
       return div;
     }
 
@@ -641,7 +848,6 @@
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        touchAction: "none",
         fontWeight: "600",
         fontSize: "11px",
         lineHeight: "1"
@@ -844,8 +1050,7 @@
         borderRadius: "50%",
         border: "1.5px solid var(--background-modifier-border, #666)",
         cursor: "pointer",
-        padding: "0",
-        touchAction: "none"
+        padding: "0"
       });
       trackListener(
         cBtn,
@@ -906,6 +1111,7 @@
         contentWrap.style.display = isCollapsed ? "none" : "flex";
         collapseBtn.innerHTML = isCollapsed ? ICONS.chevronRight : ICONS.chevronDown;
         collapseBtn.title = isCollapsed ? "Rozwiń pasek" : "Zwiń pasek";
+        syncPositionToBounds();
         try {
           localStorage.setItem(STORAGE_COLLAPSED_KEY, isCollapsed ? "1" : "0");
         } catch (err) {
@@ -915,7 +1121,7 @@
       false,
       true
     );
-    collapseBtn.style.width = "26px";
+    collapseBtn.style.touchAction = "none";
     bar.appendChild(collapseBtn);
 
     toolbarSyncFn = (fromExternal = true) => scheduleSync(fromExternal);
@@ -936,7 +1142,20 @@
       }
     }
 
-    trackDomElement(bar, parentContainer || document.body, "view");
+    trackDomElement(bar, document.body, "view");
+
+    // Dopasuj pozycję paska po wstawieniu do DOM oraz przy zmianie rozmiaru okna / paneli Obsidiana
+    requestAnimationFrame(syncPositionToBounds);
+    trackListener(window, "resize", syncPositionToBounds, false, "view");
+
+    if (typeof ResizeObserver !== "undefined" && excalidrawContainer) {
+      const ro = new ResizeObserver(() => {
+        if (!dragState) syncPositionToBounds();
+      });
+      ro.observe(excalidrawContainer);
+      registerCleanup(() => ro.disconnect(), "view");
+    }
+
     registerCleanup(() => {
       if (syncTimer) clearTimeout(syncTimer);
       if (toolbarSyncFn) {
@@ -1011,7 +1230,7 @@
 
     logMsg(`Podpięto do widoku Excalidraw (API: ${Boolean(api)}).`);
 
-    createFloatingToolbar(document.body);
+    createFloatingToolbar(container);
 
     if (!activeApi) {
       let retries = 0;
@@ -1069,13 +1288,11 @@
       const btnPressed = isPenSideButtonPressed(e);
 
       if (btnPressed) {
-        // Reaguj wyłącznie w momencie kliknięcia (zbocze narastające)
         if (!penEraseState.wasButtonPressed) {
           penEraseState.wasButtonPressed = true;
           toggleEraseFromPenButton("hover-click");
         }
       } else if (penEraseState.wasButtonPressed) {
-        // Przycisk został puszczony — resetujemy flagę detekcji kliknięcia, ale gumka zostaje aktywna
         penEraseState.wasButtonPressed = false;
       }
 
@@ -1101,7 +1318,6 @@
           `PEN up | btn=${e.button} btns=${e.buttons} press=${Number(e.pressure || 0).toFixed(3)} autoErase=${penEraseState.isAutoErasing}`
         );
       }
-      // Gumka NIE wyłącza się po oderwaniu rysika od ekranu — czeka na ponowne kliknięcie przycisku
     };
 
     const onPointerCancel = (e) => {
