@@ -10,7 +10,8 @@
   const PEN_CONTEXT_WINDOW_MS = 600;
   const MOVE_THROTTLE_MS = 140;
   const MAX_OVERLAY_LOGS = 60;
-  const SNAP_THRESHOLD_PX = 36;
+  const SNAP_ENTER_PX = 36;
+  const SNAP_EXIT_PX = 58;
   const EDGE_MARGIN_PX = 10;
 
   if (typeof window.__spenNotesCleanup === "function") {
@@ -96,11 +97,13 @@
     isPenDown: false
   };
 
-  // Optymistyczny stan paska, aby UI nie było o "krok w tył" względem getAppState()
+  // Optymistyczny stan paska z niezależnym zapamiętywaniem grubości dla pióra i zakreślacza
   const uiState = {
     tool: "freedraw",
     strokeColor: "#1e1e1e",
     strokeWidth: 2,
+    penWidth: 2,
+    highlighterWidth: 16,
     opacity: 100,
     highlighter: false
   };
@@ -273,18 +276,23 @@
     const currentTool = getCurrentToolType(api);
 
     if ((currentTool === "eraser" || uiState.tool === "eraser") && targetTool !== "eraser") {
-      if (wasHighlighter && targetTool === "freedraw") {
-        uiState.highlighter = true;
+      if (targetTool === "freedraw") {
+        uiState.highlighter = wasHighlighter;
         uiState.opacity = prevOpacity;
         uiState.strokeWidth = prevWidth;
+        if (wasHighlighter) {
+          uiState.highlighterWidth = prevWidth;
+        } else {
+          uiState.penWidth = prevWidth;
+        }
         updateAppStateSafe(api, {
           currentItemOpacity: prevOpacity,
           currentItemStrokeWidth: prevWidth
         });
       }
       setToolSafe(api, targetTool);
-      if (wasHighlighter && targetTool === "freedraw") {
-        uiState.highlighter = true;
+      if (targetTool === "freedraw") {
+        uiState.highlighter = wasHighlighter;
       }
       logMsg(`Toggle-Erase koniec (${reason}) -> przywrócono: ${wasHighlighter ? "zakreślacz" : targetTool}`);
     } else {
@@ -485,6 +493,20 @@
   function createFloatingToolbar(excalidrawContainer) {
     ensureToolbarStyles();
 
+    // Delikatna ramka podglądu dokowania podczas przeciągania (eliminuje migotanie rozmiaru w locie)
+    const snapGhost = document.createElement("div");
+    Object.assign(snapGhost.style, {
+      position: "fixed",
+      zIndex: "9989",
+      pointerEvents: "none",
+      borderRadius: "10px",
+      border: "2px dashed var(--interactive-accent, #705dcf)",
+      backgroundColor: "rgba(112, 93, 207, 0.14)",
+      display: "none",
+      boxSizing: "border-box"
+    });
+    trackDomElement(snapGhost, document.body, "view");
+
     const bar = document.createElement("div");
     bar.id = "spen-notes-floating-toolbar";
     Object.assign(bar.style, {
@@ -512,7 +534,6 @@
       trackListener(bar, evtName, (e) => e.stopPropagation(), false, "view");
     });
 
-    // Stan dokowania i pozycji względem widoku Excalidraw
     let layoutState = {
       dock: "top", // "top" | "bottom" | "left" | "right" | "none"
       relX: 0.5,
@@ -653,6 +674,77 @@
       }
     }
 
+    function detectSnapSide(rect, bounds, currentCandidate) {
+      const distTop = Math.abs(rect.top - (bounds.top + EDGE_MARGIN_PX));
+      const distBottom = Math.abs(bounds.bottom - EDGE_MARGIN_PX - rect.bottom);
+      const distLeft = Math.abs(rect.left - (bounds.left + EDGE_MARGIN_PX));
+      const distRight = Math.abs(bounds.right - EDGE_MARGIN_PX - rect.right);
+
+      const candidates = [
+        { side: "top", dist: distTop },
+        { side: "bottom", dist: distBottom },
+        { side: "left", dist: distLeft },
+        { side: "right", dist: distRight }
+      ].sort((a, b) => a.dist - b.dist);
+
+      // Histereza zapobiega migotaniu na granicy strefy dokowania
+      const threshold = currentCandidate && currentCandidate !== "none" ? SNAP_EXIT_PX : SNAP_ENTER_PX;
+      return candidates[0].dist <= threshold ? candidates[0].side : "none";
+    }
+
+    function updateSnapGhost(side, barRect, bounds) {
+      if (!side || side === "none") {
+        snapGhost.style.display = "none";
+        return;
+      }
+
+      const isVert = side === "left" || side === "right";
+      const longSide = Math.max(barRect.width, barRect.height);
+      const shortSide = Math.min(barRect.width, barRect.height);
+
+      const ghostW = isVert
+        ? shortSide
+        : Math.min(longSide, Math.max(80, bounds.width - EDGE_MARGIN_PX * 2));
+      const ghostH = isVert
+        ? Math.min(longSide, Math.max(80, bounds.height - EDGE_MARGIN_PX * 2))
+        : shortSide;
+
+      let gLeft = barRect.left;
+      let gTop = barRect.top;
+
+      if (side === "top") {
+        gTop = bounds.top + EDGE_MARGIN_PX;
+        gLeft = Math.max(
+          bounds.left + EDGE_MARGIN_PX,
+          Math.min(bounds.right - ghostW - EDGE_MARGIN_PX, barRect.left)
+        );
+      } else if (side === "bottom") {
+        gTop = bounds.bottom - ghostH - EDGE_MARGIN_PX;
+        gLeft = Math.max(
+          bounds.left + EDGE_MARGIN_PX,
+          Math.min(bounds.right - ghostW - EDGE_MARGIN_PX, barRect.left)
+        );
+      } else if (side === "left") {
+        gLeft = bounds.left + EDGE_MARGIN_PX;
+        gTop = Math.max(
+          bounds.top + EDGE_MARGIN_PX,
+          Math.min(bounds.bottom - ghostH - EDGE_MARGIN_PX, barRect.top)
+        );
+      } else if (side === "right") {
+        gLeft = bounds.right - ghostW - EDGE_MARGIN_PX;
+        gTop = Math.max(
+          bounds.top + EDGE_MARGIN_PX,
+          Math.min(bounds.bottom - ghostH - EDGE_MARGIN_PX, barRect.top)
+        );
+      }
+
+      snapGhost.style.display = "block";
+      snapGhost.style.left = `${Math.round(gLeft)}px`;
+      snapGhost.style.top = `${Math.round(gTop)}px`;
+      snapGhost.style.width = `${Math.round(ghostW)}px`;
+      snapGhost.style.height = `${Math.round(ghostH)}px`;
+    }
+
     const dragHandle = document.createElement("div");
     dragHandle.innerHTML = ICONS.grip;
     dragHandle.title = "Przeciągnij pasek (przyciąga do góry, dołu lub boków)";
@@ -683,7 +775,8 @@
         dragState = {
           pointerId: e.pointerId,
           offsetX: e.clientX - rect.left,
-          offsetY: e.clientY - rect.top
+          offsetY: e.clientY - rect.top,
+          pendingSide: layoutState.dock
         };
         dragHandle.style.cursor = "grabbing";
         if (typeof dragHandle.setPointerCapture === "function") {
@@ -708,17 +801,6 @@
         const rawLeft = e.clientX - dragState.offsetX;
         const rawTop = e.clientY - dragState.offsetY;
 
-        // Podgląd orientacji podczas zbliżania do lewej lub prawej krawędzi
-        const distLeft = Math.abs(rawLeft - (bounds.left + EDGE_MARGIN_PX));
-        const distRight = Math.abs(bounds.right - EDGE_MARGIN_PX - (rawLeft + bar.offsetWidth));
-        const nearSide = distLeft < SNAP_THRESHOLD_PX || distRight < SNAP_THRESHOLD_PX;
-        applyOrientation(nearSide);
-
-        const maxAvailW = Math.max(80, bounds.width - EDGE_MARGIN_PX * 2);
-        const maxAvailH = Math.max(80, bounds.height - EDGE_MARGIN_PX * 2);
-        bar.style.maxWidth = nearSide ? "none" : `${maxAvailW}px`;
-        bar.style.maxHeight = nearSide ? `${maxAvailH}px` : "none";
-
         const minLeft = bounds.left + EDGE_MARGIN_PX;
         const maxLeft = Math.max(minLeft, bounds.right - bar.offsetWidth - EDGE_MARGIN_PX);
         const minTop = bounds.top + EDGE_MARGIN_PX;
@@ -729,6 +811,11 @@
 
         bar.style.left = `${Math.round(clampedLeft)}px`;
         bar.style.top = `${Math.round(clampedTop)}px`;
+
+        const currentRect = bar.getBoundingClientRect();
+        const nextSide = detectSnapSide(currentRect, bounds, dragState.pendingSide);
+        dragState.pendingSide = nextSide;
+        updateSnapGhost(nextSide, currentRect, bounds);
       },
       false,
       "view"
@@ -736,35 +823,28 @@
 
     const finishDrag = (e) => {
       if (!dragState || (e && e.pointerId !== undefined && e.pointerId !== dragState.pointerId)) return;
+      const finalSide = dragState.pendingSide || "none";
       dragState = null;
       dragHandle.style.cursor = "grab";
+      snapGhost.style.display = "none";
 
       const bounds = getViewportBounds();
-      const rect = bar.getBoundingClientRect();
+      layoutState.dock = finalSide;
 
-      const distTop = Math.abs(rect.top - (bounds.top + EDGE_MARGIN_PX));
-      const distBottom = Math.abs(bounds.bottom - EDGE_MARGIN_PX - rect.bottom);
-      const distLeft = Math.abs(rect.left - (bounds.left + EDGE_MARGIN_PX));
-      const distRight = Math.abs(bounds.right - EDGE_MARGIN_PX - rect.right);
-
-      const candidates = [
-        { side: "top", dist: distTop },
-        { side: "bottom", dist: distBottom },
-        { side: "left", dist: distLeft },
-        { side: "right", dist: distRight }
-      ].sort((a, b) => a.dist - b.dist);
-
-      if (candidates[0].dist <= SNAP_THRESHOLD_PX) {
-        layoutState.dock = candidates[0].side;
-      } else {
-        layoutState.dock = "none";
-      }
-
-      // Przelicz orientację po zatwierdzeniu dokowania, aby dokładnie policzyć relatywną pozycję
       const isVertical = layoutState.dock === "left" || layoutState.dock === "right";
       applyOrientation(isVertical);
-      const updatedRect = bar.getBoundingClientRect();
 
+      const maxAvailW = Math.max(80, bounds.width - EDGE_MARGIN_PX * 2);
+      const maxAvailH = Math.max(80, bounds.height - EDGE_MARGIN_PX * 2);
+      if (isVertical) {
+        bar.style.maxWidth = "none";
+        bar.style.maxHeight = `${maxAvailH}px`;
+      } else {
+        bar.style.maxWidth = `${maxAvailW}px`;
+        bar.style.maxHeight = "none";
+      }
+
+      const updatedRect = bar.getBoundingClientRect();
       const freeW = Math.max(1, bounds.width - updatedRect.width - EDGE_MARGIN_PX * 2);
       const freeH = Math.max(1, bounds.height - updatedRect.height - EDGE_MARGIN_PX * 2);
 
@@ -795,7 +875,6 @@
     });
     bar.appendChild(contentWrap);
 
-    // Umożliwia przewijanie poziome kółkiem myszy na desktopie
     trackListener(
       contentWrap,
       "wheel",
@@ -928,8 +1007,12 @@
 
       if (uiState.tool !== "freedraw" || uiState.opacity > 50) {
         uiState.highlighter = false;
-      } else if (uiState.tool === "freedraw" && uiState.opacity <= 50 && uiState.strokeWidth === 16) {
+        if (uiState.tool === "freedraw") {
+          uiState.penWidth = uiState.strokeWidth;
+        }
+      } else if (uiState.tool === "freedraw" && uiState.opacity <= 50) {
         uiState.highlighter = true;
+        uiState.highlighterWidth = uiState.strokeWidth;
       }
 
       renderToolbarVisuals();
@@ -954,24 +1037,28 @@
       penEraseState.isAutoErasing = false;
       uiState.highlighter = false;
       uiState.opacity = 100;
+      uiState.strokeWidth = uiState.penWidth;
       uiState.tool = "freedraw";
       renderToolbarVisuals();
-      updateAppStateSafe(api, { currentItemOpacity: 100 });
+      updateAppStateSafe(api, {
+        currentItemOpacity: 100,
+        currentItemStrokeWidth: uiState.penWidth
+      });
       setToolSafe(api, "freedraw");
       scheduleSync(false);
     }, false, true);
 
-    const highlighterBtn = createActionBtn(ICONS.highlighter, "Zakreślacz (opacity 40, grubość 16)", () => {
+    const highlighterBtn = createActionBtn(ICONS.highlighter, "Zakreślacz (opacity 40)", () => {
       const api = ensureApiReady("Zakreślacz");
       penEraseState.isAutoErasing = false;
       uiState.highlighter = true;
       uiState.opacity = 40;
-      uiState.strokeWidth = 16;
+      uiState.strokeWidth = uiState.highlighterWidth;
       uiState.tool = "freedraw";
       renderToolbarVisuals();
       updateAppStateSafe(api, {
         currentItemOpacity: 40,
-        currentItemStrokeWidth: 16
+        currentItemStrokeWidth: uiState.highlighterWidth
       });
       setToolSafe(api, "freedraw");
       scheduleSync(false);
@@ -1079,14 +1166,24 @@
     strokeWidths.forEach((w) => {
       const wBtn = createActionBtn(`${w}`, `Grubość ${w}`, () => {
         const api = ensureApiReady(`grubość:${w}`);
-        uiState.highlighter = false;
         uiState.strokeWidth = w;
-        uiState.opacity = 100;
-        renderToolbarVisuals();
-        updateAppStateSafe(api, {
-          currentItemStrokeWidth: w,
-          currentItemOpacity: 100
-        });
+        if (uiState.highlighter) {
+          uiState.highlighterWidth = w;
+          uiState.opacity = 40;
+          renderToolbarVisuals();
+          updateAppStateSafe(api, {
+            currentItemStrokeWidth: w,
+            currentItemOpacity: 40
+          });
+        } else {
+          uiState.penWidth = w;
+          uiState.opacity = 100;
+          renderToolbarVisuals();
+          updateAppStateSafe(api, {
+            currentItemStrokeWidth: w,
+            currentItemOpacity: 100
+          });
+        }
         scheduleSync(false);
       });
       widthButtons.push({ width: w, btn: wBtn });
@@ -1144,7 +1241,6 @@
 
     trackDomElement(bar, document.body, "view");
 
-    // Dopasuj pozycję paska po wstawieniu do DOM oraz przy zmianie rozmiaru okna / paneli Obsidiana
     requestAnimationFrame(syncPositionToBounds);
     trackListener(window, "resize", syncPositionToBounds, false, "view");
 
