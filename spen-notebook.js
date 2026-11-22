@@ -65,6 +65,22 @@
     }, scope);
   }
 
+  // Ikony SVG w stylu Lucide (spójne z interfejsem Obsidiana)
+  const ICONS = {
+    grip: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>`,
+    pen: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+    highlighter: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>`,
+    eraser: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>`,
+    lasso: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 22a5 5 0 0 1-2-4"/><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"/><path d="M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>`,
+    undo: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>`,
+    redo: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>`,
+    addPage: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`,
+    grid: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>`,
+    magnet: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15"/><path d="m5 8 4 4"/><path d="m12 15 4 4"/></svg>`,
+    chevronDown: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+    chevronRight: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
+  };
+
   // Stan Modułu 1 (Toggle-to-Erase przyciskiem S Pen)
   const penEraseState = {
     isAutoErasing: false,
@@ -371,8 +387,8 @@
       const btn = document.createElement("button");
       btn.textContent = label;
       Object.assign(btn.style, {
-        minWidth: "36px",
-        minHeight: "36px",
+        minWidth: "32px",
+        minHeight: "32px",
         padding: "4px 8px",
         fontSize: "11px",
         cursor: "pointer",
@@ -463,19 +479,19 @@
       zIndex: "9990",
       display: "flex",
       alignItems: "center",
-      gap: "6px",
-      padding: "6px 8px",
+      flexWrap: "nowrap",
+      gap: "4px",
+      padding: "5px 6px",
       maxWidth: "96vw",
-      flexWrap: "wrap",
       backgroundColor: "var(--background-primary, #1e1e1e)",
       color: "var(--text-normal, #e0e0e0)",
       border: "1px solid var(--background-modifier-border, #444)",
-      borderRadius: "12px",
+      borderRadius: "10px",
       boxShadow: "0 6px 20px rgba(0,0,0,0.28)",
       touchAction: "none",
       userSelect: "none",
       fontFamily: "var(--font-interface, sans-serif)",
-      fontSize: "12px"
+      fontSize: "11px"
     });
 
     ["pointerdown", "pointermove", "pointerup", "touchstart", "contextmenu"].forEach((evtName) => {
@@ -496,20 +512,21 @@
     }
 
     const dragHandle = document.createElement("div");
-    dragHandle.textContent = "⋮⋮";
+    dragHandle.innerHTML = ICONS.grip;
     dragHandle.title = "Przeciągnij pasek";
     Object.assign(dragHandle.style, {
-      minWidth: "36px",
-      minHeight: "36px",
+      width: "26px",
+      height: "30px",
+      flexShrink: "0",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
       cursor: "grab",
-      borderRadius: "8px",
+      borderRadius: "7px",
       backgroundColor: "var(--background-secondary, #2b2b2b)",
       border: "1px solid var(--background-modifier-border, #444)",
-      touchAction: "none",
-      fontWeight: "bold"
+      color: "var(--text-muted, #aaa)",
+      touchAction: "none"
     });
     bar.appendChild(dragHandle);
 
@@ -579,8 +596,11 @@
     Object.assign(contentWrap.style, {
       display: isCollapsed ? "none" : "flex",
       alignItems: "center",
-      gap: "6px",
-      flexWrap: "wrap"
+      justifyContent: "center",
+      gap: "4px",
+      flexWrap: "wrap",
+      flex: "1 1 auto",
+      minWidth: "0"
     });
     bar.appendChild(contentWrap);
 
@@ -588,24 +608,31 @@
       const div = document.createElement("span");
       Object.assign(div.style, {
         width: "1px",
-        height: "24px",
+        height: "20px",
         backgroundColor: "var(--background-modifier-border, #555)",
-        margin: "0 2px"
+        margin: "0 1px",
+        flexShrink: "0"
       });
       return div;
     }
 
-    function createActionBtn(label, title, onClick, isDisabled = false) {
+    function createActionBtn(content, title, onClick, isDisabled = false, isHtml = false) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = label;
+      if (isHtml) {
+        btn.innerHTML = content;
+      } else {
+        btn.textContent = content;
+      }
       btn.title = title;
+      btn.setAttribute("aria-label", title);
       btn.disabled = isDisabled;
       Object.assign(btn.style, {
-        minWidth: "36px",
-        minHeight: "36px",
-        padding: "0 8px",
-        borderRadius: "8px",
+        width: "30px",
+        height: "30px",
+        padding: "0",
+        flexShrink: "0",
+        borderRadius: "7px",
         border: "1px solid var(--background-modifier-border, #555)",
         backgroundColor: "var(--background-secondary, #2a2a2a)",
         color: "var(--text-normal, #e0e0e0)",
@@ -615,7 +642,9 @@
         alignItems: "center",
         justifyContent: "center",
         touchAction: "none",
-        fontWeight: "600"
+        fontWeight: "600",
+        fontSize: "11px",
+        lineHeight: "1"
       });
       if (!isDisabled) {
         trackListener(
@@ -656,7 +685,7 @@
         btn.style.backgroundColor = hex;
         const isSelected = (uiState.strokeColor || "").toLowerCase() === hex.toLowerCase();
         btn.style.boxShadow = isSelected
-          ? "0 0 0 2px var(--background-primary, #1e1e1e), 0 0 0 4px var(--interactive-accent, #705dcf)"
+          ? "0 0 0 2px var(--background-primary, #1e1e1e), 0 0 0 3.5px var(--interactive-accent, #705dcf)"
           : "none";
       });
 
@@ -714,7 +743,7 @@
       }, fromExternal ? 60 : 0);
     }
 
-    const penBtn = createActionBtn("Pióro", "Pióro (freedraw)", () => {
+    const penBtn = createActionBtn(ICONS.pen, "Pióro (freedraw)", () => {
       const api = ensureApiReady("Pióro");
       penEraseState.isAutoErasing = false;
       uiState.highlighter = false;
@@ -724,9 +753,9 @@
       updateAppStateSafe(api, { currentItemOpacity: 100 });
       setToolSafe(api, "freedraw");
       scheduleSync(false);
-    });
+    }, false, true);
 
-    const highlighterBtn = createActionBtn("Zakreślacz", "Zakreślacz (opacity 40, grubość 16)", () => {
+    const highlighterBtn = createActionBtn(ICONS.highlighter, "Zakreślacz (opacity 40, grubość 16)", () => {
       const api = ensureApiReady("Zakreślacz");
       penEraseState.isAutoErasing = false;
       uiState.highlighter = true;
@@ -740,9 +769,9 @@
       });
       setToolSafe(api, "freedraw");
       scheduleSync(false);
-    });
+    }, false, true);
 
-    const eraserBtn = createActionBtn("Gumka", "Gumka (eraser)", () => {
+    const eraserBtn = createActionBtn(ICONS.eraser, "Gumka (eraser)", () => {
       const api = ensureApiReady("Gumka");
       penEraseState.isAutoErasing = false;
       uiState.highlighter = false;
@@ -750,9 +779,9 @@
       renderToolbarVisuals();
       setToolSafe(api, "eraser");
       scheduleSync(false);
-    });
+    }, false, true);
 
-    const selectBtn = createActionBtn("Lasso", "Zaznaczanie (selection)", () => {
+    const selectBtn = createActionBtn(ICONS.lasso, "Zaznaczanie (selection)", () => {
       const api = ensureApiReady("Lasso");
       penEraseState.isAutoErasing = false;
       uiState.highlighter = false;
@@ -760,9 +789,9 @@
       renderToolbarVisuals();
       setToolSafe(api, "selection");
       scheduleSync(false);
-    });
+    }, false, true);
 
-    const undoBtn = createActionBtn("Cofnij", "Cofnij (Undo)", () => {
+    const undoBtn = createActionBtn(ICONS.undo, "Cofnij (Undo)", () => {
       const api = ensureApiReady("Cofnij");
       if (api && api.history && typeof api.history.undo === "function") {
         api.history.undo();
@@ -772,9 +801,9 @@
         logMsg("Metoda history.undo nie jest dostępna w tym API.", true);
       }
       scheduleSync(true);
-    });
+    }, false, true);
 
-    const redoBtn = createActionBtn("Ponów", "Ponów (Redo)", () => {
+    const redoBtn = createActionBtn(ICONS.redo, "Ponów (Redo)", () => {
       const api = ensureApiReady("Ponów");
       if (api && api.history && typeof api.history.redo === "function") {
         api.history.redo();
@@ -782,7 +811,7 @@
         logMsg("Metoda history.redo nie jest dostępna w tym API.", true);
       }
       scheduleSync(true);
-    });
+    }, false, true);
 
     contentWrap.appendChild(penBtn);
     contentWrap.appendChild(highlighterBtn);
@@ -807,11 +836,13 @@
       const cBtn = document.createElement("button");
       cBtn.type = "button";
       cBtn.title = pDef.label;
+      cBtn.setAttribute("aria-label", pDef.label);
       Object.assign(cBtn.style, {
-        minWidth: "36px",
-        minHeight: "36px",
+        width: "26px",
+        height: "26px",
+        flexShrink: "0",
         borderRadius: "50%",
-        border: "2px solid var(--background-modifier-border, #666)",
+        border: "1.5px solid var(--background-modifier-border, #666)",
         cursor: "pointer",
         padding: "0",
         touchAction: "none"
@@ -859,28 +890,32 @@
 
     contentWrap.appendChild(makeDivider());
 
-    const pagePlaceholderBtn = createActionBtn("+ Strona", "Dostępne w Etapie 2", () => {}, true);
-    const gridPlaceholderBtn = createActionBtn("Siatka", "Dostępne w Etapie 2", () => {}, true);
-    const snapPlaceholderBtn = createActionBtn("Przyciąg.", "Dostępne w Etapie 2", () => {}, true);
+    const pagePlaceholderBtn = createActionBtn(ICONS.addPage, "Dodaj stronę (Etap 2)", () => {}, true, true);
+    const gridPlaceholderBtn = createActionBtn(ICONS.grid, "Siatka (Etap 2)", () => {}, true, true);
+    const snapPlaceholderBtn = createActionBtn(ICONS.magnet, "Przyciąganie (Etap 2)", () => {}, true, true);
 
     contentWrap.appendChild(pagePlaceholderBtn);
     contentWrap.appendChild(gridPlaceholderBtn);
     contentWrap.appendChild(snapPlaceholderBtn);
 
     const collapseBtn = createActionBtn(
-      isCollapsed ? "▸" : "▾",
+      isCollapsed ? ICONS.chevronRight : ICONS.chevronDown,
       isCollapsed ? "Rozwiń pasek" : "Zwiń pasek",
       () => {
         isCollapsed = !isCollapsed;
         contentWrap.style.display = isCollapsed ? "none" : "flex";
-        collapseBtn.textContent = isCollapsed ? "▸" : "▾";
+        collapseBtn.innerHTML = isCollapsed ? ICONS.chevronRight : ICONS.chevronDown;
+        collapseBtn.title = isCollapsed ? "Rozwiń pasek" : "Zwiń pasek";
         try {
           localStorage.setItem(STORAGE_COLLAPSED_KEY, isCollapsed ? "1" : "0");
         } catch (err) {
           // Ignoruj
         }
-      }
+      },
+      false,
+      true
     );
+    collapseBtn.style.width = "26px";
     bar.appendChild(collapseBtn);
 
     toolbarSyncFn = (fromExternal = true) => scheduleSync(fromExternal);
